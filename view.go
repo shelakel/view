@@ -7,17 +7,28 @@ import (
 	"sync"
 )
 
+// View represents a template, such as html/template or view/template
 type View interface {
 	Execute(w io.Writer, data interface{}) error
 }
 
+// Manager is a simple view manager supporting sandboxed (pooled buffer) renders and runtime view registration/replacement
 type Manager struct {
 	m       *sync.RWMutex
 	buffers *bufferPool
 	views   map[string]View
 }
 
+var ErrBufferPoolSizeInvalid = fmt.Errorf("view: bufferPoolSize should be greater than zero")
+
+// New creates a new view Manager
+//
+// - bufferPoolSize should be greater than zero, typically 50 or more.
+// - views represent the initial views registered and can be nil
 func New(bufferPoolSize int, views map[string]View) *Manager {
+	if bufferPoolSize <= 0 {
+		panic(ErrBufferPoolSizeInvalid)
+	}
 	m := &Manager{
 		m:       &sync.RWMutex{},
 		buffers: newBufferPool(bufferPoolSize),
@@ -34,6 +45,9 @@ func New(bufferPoolSize int, views map[string]View) *Manager {
 	return m
 }
 
+// MustRegister registers or replaces a view with the name
+//
+// - v can't be nil
 func (m *Manager) MustRegister(name string, v View) *Manager {
 	if v == nil {
 		panic(fmt.Errorf("view: View \"%s\" is nil", name))
@@ -44,7 +58,16 @@ func (m *Manager) MustRegister(name string, v View) *Manager {
 	return m
 }
 
+var ErrWriterRequired = fmt.Errorf("view: w can't be nil")
+
+// Render renders the view to a pooled buffer instance and if no error occurred, writes to w
+//
+// - calling render with a name of a view that's not registered will return an error
+// - w can't be nil
 func (m *Manager) Render(name string, w io.Writer, data interface{}) error {
+	if w == nil {
+		return ErrWriterRequired
+	}
 	m.m.RLock()
 	v, ok := m.views[name]
 	m.m.RUnlock()
